@@ -41,12 +41,12 @@ const getModelAndItem = async (itemType, itemId, userId = null) => {
 // Request verification for any item type
 router.post('/request/:itemType/:itemId', requireAuth, async (req, res) => {
   try {
-    const { verifierEmail } = req.body;
+    const { verifierEmail, verifierId } = req.body;
     const { itemType, itemId } = req.params;
 
-    if (!verifierEmail) {
+    if (!verifierEmail && !verifierId) {
       return res.status(400).json({ 
-        message: 'Verifier email is required' 
+        message: 'Either verifier email or verifier ID is required' 
       });
     }
 
@@ -73,11 +73,19 @@ router.post('/request/:itemType/:itemId', requireAuth, async (req, res) => {
       });
     }
 
-    // Verify that verifier exists and belongs to same institute
-    const verifier = await User.findOne({ 
-      email: verifierEmail.toLowerCase(),
-      role: 'VERIFIER' 
-    });
+    // Find verifier by email or ID
+    let verifier;
+    if (verifierId) {
+      verifier = await User.findOne({ 
+        _id: verifierId,
+        role: 'VERIFIER' 
+      });
+    } else {
+      verifier = await User.findOne({ 
+        email: verifierEmail.toLowerCase(),
+        role: 'VERIFIER' 
+      });
+    }
 
     if (!verifier) {
       return res.status(400).json({ 
@@ -120,7 +128,7 @@ router.post('/request/:itemType/:itemId', requireAuth, async (req, res) => {
     const verification = new Verification({
       itemId: itemId,
       itemType: itemType.toUpperCase(),
-      verifierEmail: verifierEmail.toLowerCase(),
+      verifierEmail: verifier.email.toLowerCase(),
       token
     });
 
@@ -131,13 +139,17 @@ router.post('/request/:itemType/:itemId', requireAuth, async (req, res) => {
       verificationId: verification._id,
       action: 'CREATED',
       actorEmail: req.user.email,
-      metadata: { verifierEmail, itemType }
+      metadata: { 
+        verifierEmail: verifier.email, 
+        verifierName: verifier.name,
+        itemType 
+      }
     }).save();
 
     // Send verification email
     const itemTitle = item.title || item.courseName || item.projectName || 'Item';
     const emailSent = await sendVerificationEmail(
-      verifierEmail,
+      verifier.email,
       token,
       itemTitle,
       item.userId.name,

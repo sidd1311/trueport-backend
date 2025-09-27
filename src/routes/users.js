@@ -108,35 +108,7 @@ router.put('/me', requireAuth, async (req, res) => {
   }
 });
 
-// Get user by ID (public profile info only)
-router.get('/:userId', async (req, res) => {
-  try {
-    const user = await User.findById(req.params.userId)
-      .select('name email githubUsername bio institute profileJson createdAt role');
-
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    res.json({
-      user: user.toJSON()
-    });
-
-  } catch (error) {
-    console.error('Get user error:', error);
-    
-    if (error.name === 'CastError') {
-      return res.status(400).json({ message: 'Invalid user ID' });
-    }
-
-    res.status(500).json({ 
-      message: 'Failed to fetch user', 
-      error: error.message 
-    });
-  }
-});
-
-// Get users by institute
+// Get users by institute (MOVE THIS UP - SPECIFIC ROUTE FIRST)
 router.get('/institute/:instituteName', async (req, res) => {
   try {
     const { instituteName } = req.params;
@@ -220,6 +192,93 @@ router.put('/me/password', requireAuth, async (req, res) => {
     res.status(500).json({ 
       message: 'Failed to update password', 
       error: error.message 
+    });
+  }
+});
+
+// Get verifiers from same institution (for verification requests)
+router.get('/institute-verifiers', requireAuth, async (req, res) => {
+  try {
+    const userInstitute = req.user.institute;
+    const { search, department, page = 1, limit = 20 } = req.query;
+
+    if (!userInstitute) {
+      return res.status(400).json({
+        message: 'User must have an institute associated to find verifiers'
+      });
+    }
+
+    // Build search query
+    const query = {
+      institute: userInstitute,
+      role: 'VERIFIER'
+    };
+
+    // Add search filters
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { 'profileJson.department': { $regex: search, $options: 'i' } },
+        { 'profileJson.designation': { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    if (department) {
+      query['profileJson.department'] = { $regex: department, $options: 'i' };
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Get verifiers with pagination
+    const [verifiers, total] = await Promise.all([
+      User.find(query)
+        .select('name email profileJson createdAt')
+        .sort({ name: 1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
+      User.countDocuments(query)
+    ]);
+
+    // Get verification stats for each verifier (optional performance enhancement)
+    const verifiersWithStats = await Promise.all(
+      verifiers.map(async (verifier) => {
+        const verificationsCount = await require('../models/Verification').countDocuments({
+          verifierEmail: verifier.email,
+          status: { $in: ['APPROVED', 'REJECTED'] }
+        });
+
+        return {
+          id: verifier._id,
+          name: verifier.name,
+          email: verifier.email,
+          bio: verifier.profileJson?.bio || '',
+          department: verifier.profileJson?.department || '',
+          designation: verifier.profileJson?.designation || 'Verifier',
+          expertise: verifier.profileJson?.expertise || [],
+          verificationsCompleted: verificationsCount,
+          joinedAt: verifier.createdAt,
+          isActive: verifier.createdAt > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) // Active in last 30 days
+        };
+      })
+    );
+
+    res.json({
+      institute: userInstitute,
+      verifiers: verifiersWithStats,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+
+  } catch (error) {
+    console.error('Get institute verifiers error:', error);
+    res.status(500).json({
+      message: 'Failed to fetch institute verifiers',
+      error: error.message
     });
   }
 });
