@@ -428,41 +428,7 @@ FROM_EMAIL=noreply@yourdomain.com
 FRONTEND_URL=https://your-frontend-domain.com
 ```
 
-### Deployment Platforms
 
-#### Heroku
-```bash
-# Install Heroku CLI and login
-heroku create your-app-name
-heroku config:set NODE_ENV=production
-heroku config:set MONGODB_URI=your-mongodb-uri
-# ... set other environment variables
-git push heroku main
-```
-
-#### Render
-1. Connect your GitHub repository
-2. Set environment variables in dashboard
-3. Deploy automatically on push
-
-## 🧪 Testing
-
-```bash
-# Run tests (add test scripts to package.json)
-npm test
-```
-
-## 📝 License
-
-This project is licensed under the MIT License.
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
 
 ## 🆘 Support
 
