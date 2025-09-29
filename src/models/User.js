@@ -19,18 +19,59 @@ const userSchema = new mongoose.Schema({
   passwordHash: {
     type: String,
     required: function() {
-      return !this.githubUsername; // Password required only if no GitHub login
+      return !this.githubUsername && !this.googleId; // Password required only if no GitHub/Google login
     }
+  },
+  googleId: {
+    type: String,
+    unique: true,
+    sparse: true
+  },
+  isGoogleAuth: {
+    type: Boolean,
+    default: false
+  },
+  profilePicture: {
+    type: String,
+    trim: true
+  },
+  emailVerified: {
+    type: Boolean,
+    default: false
+  },
+  profileSetupComplete: {
+    type: Boolean,
+    default: false
   },
   role: {
     type: String,
     enum: ['STUDENT', 'VERIFIER'],
     default: 'STUDENT'
   },
+  roleSetPermanently: {
+    type: Boolean,
+    default: false
+  },
+  roleSetAt: {
+    type: Date
+  },
+  associationStatus: {
+    type: String,
+    enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED'],
+    default: 'NONE'
+  },
+  approvedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  approvedAt: {
+    type: Date
+  },
   githubUsername: {
     type: String,
     trim: true,
-    unique: true
+    unique: true,
+    sparse: true
   },
   githubToken: {
     type: String
@@ -61,6 +102,7 @@ const userSchema = new mongoose.Schema({
 // Index for faster lookups
 userSchema.index({ email: 1 });
 userSchema.index({ githubUsername: 1 });
+userSchema.index({ googleId: 1 });
 
 // Hash password before saving
 userSchema.pre('save', async function(next) {

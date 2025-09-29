@@ -2,13 +2,16 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const session = require('express-session');
 require('dotenv').config();
 
 const connectDB = require('./config/db');
+const passport = require('./config/passport');
 
 // Import routes
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
+const associationRoutes = require('./routes/associations');
 const experienceRoutes = require('./routes/experiences');
 const educationRoutes = require('./routes/education');
 const githubProjectRoutes = require('./routes/githubProjects');
@@ -31,6 +34,21 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Session middleware for passport
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'your-fallback-secret-key',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { 
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
+}));
+
+// Passport middleware
+app.use(passport.initialize());
+app.use(passport.session());
+
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -47,8 +65,9 @@ const authLimiter = rateLimit({
 });
 
 // Routes
-app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/associations', associationRoutes);
 app.use('/api/experiences', experienceRoutes);
 app.use('/api/education', educationRoutes);
 app.use('/api/github-projects', githubProjectRoutes);

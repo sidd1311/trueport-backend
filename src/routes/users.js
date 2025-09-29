@@ -23,7 +23,7 @@ router.get('/me', requireAuth, async (req, res) => {
 router.put('/me', requireAuth, async (req, res) => {
   try {
     const updates = {};
-    const allowedUpdates = ['name', 'githubUsername', 'bio', 'institute', 'profileJson'];
+    const allowedUpdates = ['name', 'githubUsername', 'bio', 'institute', 'profileJson', 'role'];
     
     // Only include allowed fields
     allowedUpdates.forEach(field => {
@@ -53,6 +53,20 @@ router.put('/me', requireAuth, async (req, res) => {
       });
     }
 
+    // Validate role if provided
+    if (updates.role && !['STUDENT', 'VERIFIER'].includes(updates.role)) {
+      return res.status(400).json({ 
+        message: 'Role must be either STUDENT or VERIFIER' 
+      });
+    }
+
+    // If role is being set to VERIFIER, institute is required
+    if (updates.role === 'VERIFIER' && !updates.institute && !req.user.institute) {
+      return res.status(400).json({ 
+        message: 'Institute name is required for VERIFIER role' 
+      });
+    }
+
     // Validate GitHub username if provided
     if (updates.githubUsername !== undefined) {
       if (!updates.githubUsername || !updates.githubUsername.trim()) {
@@ -67,6 +81,11 @@ router.put('/me', requireAuth, async (req, res) => {
       }
       // Trim the username
       updates.githubUsername = updates.githubUsername.trim();
+    }
+
+    // Mark profile setup as complete if role and institute are provided
+    if (updates.role && (updates.institute || req.user.institute)) {
+      updates.profileSetupComplete = true;
     }
 
     const user = await User.findByIdAndUpdate(
@@ -278,6 +297,197 @@ router.get('/institute-verifiers', requireAuth, async (req, res) => {
     console.error('Get institute verifiers error:', error);
     res.status(500).json({
       message: 'Failed to fetch institute verifiers',
+      error: error.message
+    });
+  }
+});
+
+// Complete profile setup - Only for initial setup, role becomes permanent after approval
+router.post('/setup-profile', requireAuth, async (req, res) => {
+  try {
+    const { role, institute } = req.body;
+    const user = req.user;
+
+    // Check if role is already set permanently
+    if (user.roleSetPermanently) {
+      return res.status(400).json({
+        message: 'Your role has already been set permanently and cannot be changed'
+      });
+    }
+
+    // Validation
+    if (!role || !['STUDENT', 'VERIFIER'].includes(role)) {
+      return res.status(400).json({
+        message: 'Valid role (STUDENT or VERIFIER) is required'
+      });
+    }
+
+    if (!institute || !institute.trim()) {
+      return res.status(400).json({
+        message: 'Institute name is required'
+      });
+    }
+
+    if (institute.length > 200) {
+      return res.status(400).json({
+        message: 'Institute name must be less than 200 characters'
+      });
+    }
+
+    // For STUDENT role, set temporarily until verifier approval
+    // For VERIFIER role, require existing verifier status or admin approval
+    const updates = {
+      role,
+      institute: institute.trim(),
+      profileSetupComplete: true
+    };
+
+    if (role === 'STUDENT') {
+      // Student role requires verifier approval to become permanent
+      updates.associationStatus = 'NONE';
+      updates.roleSetPermanently = false;
+    } else if (role === 'VERIFIER') {
+      // Verifier role should be pre-approved or require admin verification
+      // For now, allow direct setting but can be enhanced later
+      updates.roleSetPermanently = true;
+      updates.roleSetAt = new Date();
+      updates.associationStatus = 'APPROVED';
+    }
+
+    // Update user profile
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user._id,
+      updates,
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    res.json({
+      message: role === 'STUDENT' ? 
+        'Profile setup completed. Please request association with a verifier to finalize your role.' : 
+        'Profile setup completed successfully',
+      user: updatedUser.toJSON(),
+      needsAssociation: role === 'STUDENT' && !updatedUser.roleSetPermanently
+    });
+
+  } catch (error) {
+    console.error('Profile setup error:', error);
+    res.status(500).json({
+      message: 'Failed to complete profile setup',
+      error: error.message
+    });
+  }
+});
+
+// Change role - Only allowed if role is not set permanently
+router.put('/change-role', requireAuth, async (req, res) => {
+  try {
+    const { role, institute } = req.body;
+    const user = req.user;
+
+    // Check if role is already set permanently
+    if (user.roleSetPermanently) {
+      return res.status(400).json({
+        message: 'Your role has been set permanently and cannot be changed. Role was set permanently on ' + 
+                 (user.roleSetAt ? user.roleSetAt.toDateString() : 'an unknown date') + 
+                 (user.approvedBy ? ' by a verifier' : '')
+      });
+    }
+
+    // Validation
+    if (!role || !['STUDENT', 'VERIFIER'].includes(role)) {
+      return res.status(400).json({
+        message: 'Valid role (STUDENT or VERIFIER) is required'
+      });
+    }
+
+    const updates = { role };
+
+    // If changing to VERIFIER, institute is required
+    if (role === 'VERIFIER') {
+      if (!institute && !req.user.institute) {
+        return res.status(400).json({
+          message: 'Institute name is required for VERIFIER role'
+        });
+      }
+      if (institute) {
+        if (institute.length > 200) {
+          return res.status(400).json({
+            message: 'Institute name must be less than 200 characters'
+          });
+        }
+        updates.institute = institute.trim();
+      }
+      // Note: Verifier role change may require additional verification in future
+    }
+
+    // Reset association status when changing role
+    if (user.role !== role) {
+      updates.associationStatus = 'NONE';
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user._id,
+      updates,
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    res.json({
+      message: `Role changed to ${role} successfully. ${role === 'STUDENT' ? 'Please request association with a verifier to finalize your role.' : ''}`,
+      user: updatedUser.toJSON(),
+      needsAssociation: role === 'STUDENT'
+    });
+
+  } catch (error) {
+    console.error('Change role error:', error);
+    res.status(500).json({
+      message: 'Failed to change role',
+      error: error.message
+    });
+  }
+});
+
+// Get profile setup status
+router.get('/profile-status', requireAuth, async (req, res) => {
+  try {
+    const user = req.user;
+    
+    const status = {
+      isSetupComplete: user.profileSetupComplete,
+      hasRole: !!user.role,
+      hasInstitute: !!user.institute,
+      currentRole: user.role,
+      currentInstitute: user.institute,
+      needsSetup: !user.profileSetupComplete,
+      recommendations: []
+    };
+
+    // Add recommendations based on current state
+    if (!user.profileSetupComplete) {
+      status.recommendations.push('Complete your profile setup by selecting your role and institute');
+    }
+
+    if (!user.institute) {
+      status.recommendations.push('Add your institute name to connect with your academic community');
+    }
+
+    if (user.role === 'STUDENT' && user.institute) {
+      status.recommendations.push('Consider becoming a verifier to help validate other students\' achievements');
+    }
+
+    res.json(status);
+
+  } catch (error) {
+    console.error('Get profile status error:', error);
+    res.status(500).json({
+      message: 'Failed to get profile status',
       error: error.message
     });
   }
