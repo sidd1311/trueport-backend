@@ -24,6 +24,8 @@ const app = express();
 
 // Connect to MongoDB
 connectDB();
+// near top of your express setup (before routes)
+app.set('trust proxy', 1);
 
 // Middleware
 app.use(helmet());
