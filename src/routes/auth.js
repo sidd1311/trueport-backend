@@ -135,90 +135,66 @@ router.get('/google',
   passport.authenticate('google', { scope: ['profile', 'email'] })
 );
 
-// Google callback route with CSP-compliant script
+// Google callback — set cookie AND optionally return JSON { token, user }
 router.get('/google/callback',
   passport.authenticate('google', { session: false }),
   (req, res) => {
     try {
       const user = req.user;
-      const nonce = crypto.randomBytes(16).toString('base64');
-      
-      // Generate JWT token
-      const token = generateToken({ 
-        userId: user._id, 
-        email: user.email, 
-        role: user.role 
-      });
-      
-      // Set CSP header with nonce
-      res.setHeader(
-        'Content-Security-Policy',
-        `script-src 'self' 'nonce-${nonce}'; object-src 'none';`
-      );
-      
-      // Close popup and send user data to parent window
-      const target = (process.env.FRONTEND_URL || 'http://localhost:3001').replace(/\/$/, '');
-res.send(`<!doctype html><html><body>
-<script nonce="${nonce}">
-  (function(){
-    const payload = ${JSON.stringify({ type:'GOOGLE_AUTH_SUCCESS', token: '%%TOKEN%%', user: '%%USER%%' })}
-      .replace('%%TOKEN%%', ${JSON.stringify(token)})
-      .replace('%%USER%%', ${JSON.stringify(JSON.stringify(user.toJSON()))});
-    try { window.opener && window.opener.postMessage(JSON.parse(payload), '${target}'); } catch(e){ console.error(e); }
-    // close after parent ACK or after 3s fallback
-    window.addEventListener('message', (e)=>{ if (e.data==='PARENT_ACK') setTimeout(()=>window.close(),200); });
-    setTimeout(()=>window.close(),3000);
-  })();
-</script>
-</body></html>`);
+      if (!user) throw new Error('No user from passport');
 
+      // Generate JWT token
+      const token = generateToken({
+        userId: user._id,
+        email: user.email,
+        role: user.role
+      });
+
+      // Set httpOnly cookie for cookie-based flow (keeps old behavior)
+      res.cookie('auth_token', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+        path: '/'
+      });
+
+      // Build sanitized user to send to client
+      const safeUser = {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        institute: user.institute || user.instituteId || null
+      };
+
+      // Detect if client expects JSON (SPA/fetch)
+      const wantsJson =
+        req.query.format === 'json' ||
+        req.headers.accept?.includes('application/json') ||
+        req.xhr ||
+        req.headers['x-requested-with'] === 'XMLHttpRequest';
+
+      if (wantsJson) {
+        // Return same shape as regular /login
+        return res.json({
+          message: 'Login successful',
+          success: true,
+          token,
+          user: safeUser
+        });
+      }
+
+      // Otherwise default redirect flow: include token+user in fragment (not logged by servers)
+      const frontend = (process.env.FRONTEND_URL || 'http://localhost:3001').replace(/\/$/, '');
+      const payload = { token, user: safeUser };
+      const fragment = `#auth=${encodeURIComponent(JSON.stringify(payload))}`;
+
+      return res.redirect(`${frontend}/oauth-callback${fragment}`);
     } catch (error) {
       console.error('Google callback error:', error);
-      const nonce = crypto.randomBytes(16).toString('base64');
-      
-      // Set CSP header with nonce for error case
-      res.setHeader(
-        'Content-Security-Policy',
-        `script-src 'self' 'nonce-${nonce}'; object-src 'none';`
-      );
-      
-      res.send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Authentication Error</title>
-          <meta charset="utf-8">
-        </head>
-        <body>
-          <div style="text-align: center; font-family: Arial, sans-serif; padding: 50px;">
-            <h3>Authentication failed</h3>
-            <p>This window will close automatically...</p>
-          </div>
-          <script nonce="${nonce}">
-            try {
-              if (window.opener) {
-                window.opener.postMessage({
-                  type: 'GOOGLE_AUTH_ERROR',
-                  error: 'Authentication failed'
-                }, 'http://localhost:3001');
-              }
-              setTimeout(() => {
-                window.close();
-              }, 2000);
-            } catch (error) {
-              console.error('Auth error callback error:', error);
-              document.body.innerHTML = '<div style="text-align: center; font-family: Arial, sans-serif; padding: 50px;"><h3>Authentication failed!</h3><p>Please close this window.</p></div>';
-            }
-          </script>
-          <noscript>
-            <div style="text-align: center; font-family: Arial, sans-serif; padding: 50px;">
-              <h3>Authentication failed!</h3>
-              <p>Please close this window.</p>
-            </div>
-          </noscript>
-        </body>
-        </html>
-      `);
+      const frontend = (process.env.FRONTEND_URL || 'http://localhost:3001').replace(/\/$/, '');
+      return res.redirect(`${frontend}/auth/login?error=auth_failed`);
     }
   }
 );
@@ -244,21 +220,68 @@ router.post('/logout', (req, res) => {
 
 // Token validation endpoint
 router.post('/validate', async (req, res) => {
+  console.log('=== /auth/validate called ===');
+  console.log('Cookies parsed:', req.cookies);
+  console.log('Cookie header:', req.headers.cookie);
+  
   try {
     const { verifyToken } = require('../utils/jwt');
-    const authHeader = req.headers.authorization;
     
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ message: 'No token provided' });
+    let token = null;
+    
+    // 1. Check Authorization header first
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7);
+      console.log('Token from Authorization header');
+    }
+    
+    // 2. Check parsed cookies (if cookie-parser is working)
+    if (!token && req.cookies && req.cookies.auth_token) {
+      token = req.cookies.auth_token;
+      console.log('Token from parsed cookie');
+    }
+    
+    // 3. Manually parse cookie header (fallback if cookie-parser not configured)
+    if (!token && req.headers.cookie) {
+      console.log('Manually parsing cookie header');
+      const cookies = req.headers.cookie.split(';').reduce((acc, cookie) => {
+        const [key, value] = cookie.trim().split('=');
+        acc[key] = value;
+        return acc;
+      }, {});
+      
+      if (cookies.auth_token) {
+        token = cookies.auth_token;
+        console.log('Token from manual cookie parse');
+      }
+    }
+    
+    if (!token) {
+      console.log('No token found');
+      return res.status(401).json({ 
+        valid: false,
+        message: 'No token provided' 
+      });
     }
 
-    const token = authHeader.substring(7);
+    console.log('Token found:', token.substring(0, 20) + '...');
+    console.log('Verifying token...');
+    
     const decoded = verifyToken(token);
+    console.log('Token decoded:', decoded);
     
     const user = await User.findById(decoded.userId).select('-passwordHash');
+    
     if (!user) {
-      return res.status(401).json({ message: 'Invalid token - user not found' });
+      console.log('User not found');
+      return res.status(401).json({ 
+        valid: false,
+        message: 'Invalid token - user not found' 
+      });
     }
+
+    console.log('User validated:', user.email);
 
     res.json({
       valid: true,
@@ -266,11 +289,12 @@ router.post('/validate', async (req, res) => {
     });
 
   } catch (error) {
+    console.error('Validation error:', error.message);
+    
     res.status(401).json({ 
       valid: false, 
       message: error.message 
     });
   }
 });
-
 module.exports = router;

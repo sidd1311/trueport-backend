@@ -39,7 +39,426 @@ A career passport platform where students and professionals can store their expe
 - **Email**: SendGrid
 - **External APIs**: GitHub API
 
-## 📁 Project Structure
+## 🏢 Admin System (SAAS Hierarchy)
+
+### Overview
+
+TruePortMe implements a comprehensive 3-tier admin system:
+
+1. **� Super Admin (SAAS Provider)** - Complete system control
+2. **🏫 Institute Admins** - Manage their institution's users and data  
+3. **👥 Regular Users** - Students and Verifiers
+
+### 🚀 Initial Setup
+
+1. **Create Default Super Admin**
+   ```bash
+   npm run setup-admin
+   ```
+   
+   **Default Credentials:**
+   - Email: `admin@trueportme.com`
+   - Password: `admin123456`
+   - ⚠️ **Change password immediately after first login!**
+
+2. **Login to Super Admin Panel**
+   ```http
+   POST /api/super-admin/login
+   Content-Type: application/json
+
+   {
+     "email": "admin@trueportme.com",
+     "password": "admin123456"
+   }
+   ```
+
+### 🔑 Super Admin APIs
+
+#### Authentication
+```http
+POST /api/super-admin/login
+Content-Type: application/json
+
+{
+  "email": "admin@trueportme.com",
+  "password": "your-password"
+}
+```
+
+#### Profile Management
+```http
+GET /api/super-admin/me
+Authorization: Bearer <super_admin_token>
+
+PUT /api/super-admin/me
+Authorization: Bearer <super_admin_token>
+Content-Type: application/json
+
+{
+  "name": "Updated Admin Name",
+  "profilePicture": "https://cloudinary.url/profile.jpg"
+}
+
+PUT /api/super-admin/change-password
+Authorization: Bearer <super_admin_token>
+Content-Type: application/json
+
+{
+  "currentPassword": "current-password",
+  "newPassword": "new-secure-password"
+}
+```
+
+#### Institution Management
+```http
+POST /api/super-admin/institutions
+Authorization: Bearer <super_admin_token>
+Content-Type: application/json
+
+{
+  "name": "harvard-university",
+  "displayName": "Harvard University",
+  "description": "Prestigious Ivy League university",
+  "website": "https://harvard.edu",
+  "logo": "https://cloudinary.url/harvard-logo.png",
+  "address": {
+    "street": "Massachusetts Hall",
+    "city": "Cambridge",
+    "state": "MA",
+    "zipCode": "02138",
+    "country": "USA"
+  },
+  "contactInfo": {
+    "email": "info@harvard.edu",
+    "phone": "+1-617-495-1000"
+  },
+  "settings": {
+    "allowSelfRegistration": true,
+    "requireVerifierApproval": true,
+    "maxUsersLimit": 5000
+  }
+}
+
+GET /api/super-admin/institutions?page=1&limit=10&search=harvard&status=ACTIVE
+Authorization: Bearer <super_admin_token>
+
+PUT /api/super-admin/institutions/:id
+Authorization: Bearer <super_admin_token>
+
+DELETE /api/super-admin/institutions/:id
+Authorization: Bearer <super_admin_token>
+```
+
+#### Institute Admin Management
+```http
+POST /api/super-admin/institute-admins
+Authorization: Bearer <super_admin_token>
+Content-Type: application/json
+
+{
+  "name": "Dr. John Smith",
+  "email": "admin@harvard.edu",
+  "phone": "+1-617-495-2000",
+  "password": "secure-password123",
+  "institution": "harvard-university",
+  "permissions": {
+    "manageUsers": true,
+    "manageVerifiers": true,
+    "viewAnalytics": true,
+    "manageSettings": false
+  }
+}
+
+GET /api/super-admin/institute-admins?page=1&limit=10&institution=harvard-university
+Authorization: Bearer <super_admin_token>
+
+PUT /api/super-admin/institute-admins/:id
+Authorization: Bearer <super_admin_token>
+
+DELETE /api/super-admin/institute-admins/:id
+Authorization: Bearer <super_admin_token>
+```
+
+#### System Analytics
+```http
+GET /api/super-admin/analytics
+Authorization: Bearer <super_admin_token>
+```
+
+**Response:**
+```json
+{
+  "overview": {
+    "totalInstitutions": 150,
+    "totalInstituteAdmins": 300,
+    "totalUsers": 50000,
+    "totalStudents": 45000,
+    "totalVerifiers": 5000,
+    "activeInstitutions": 142
+  },
+  "recentInstitutions": [...],
+  "topInstitutions": [...]
+}
+```
+
+### 🏫 Institute Admin APIs
+
+#### Authentication
+```http
+POST /api/institute-admin/login
+Content-Type: application/json
+
+{
+  "email": "admin@harvard.edu",
+  "password": "your-password"
+}
+```
+
+#### Profile Management
+```http
+GET /api/institute-admin/me
+Authorization: Bearer <institute_admin_token>
+
+PUT /api/institute-admin/me
+Authorization: Bearer <institute_admin_token>
+Content-Type: application/json
+
+{
+  "name": "Updated Name",
+  "phone": "+1-617-495-2001",
+  "profilePicture": "https://cloudinary.url/profile.jpg"
+}
+
+PUT /api/institute-admin/change-password
+Authorization: Bearer <institute_admin_token>
+Content-Type: application/json
+
+{
+  "currentPassword": "current-password",
+  "newPassword": "new-secure-password"
+}
+```
+
+#### Institution Information
+```http
+GET /api/institute-admin/institution
+Authorization: Bearer <institute_admin_token>
+```
+
+#### User Management
+```http
+GET /api/institute-admin/users?page=1&limit=10&search=john&role=STUDENT
+Authorization: Bearer <institute_admin_token>
+
+GET /api/institute-admin/users/:userId
+Authorization: Bearer <institute_admin_token>
+
+POST /api/institute-admin/users
+Authorization: Bearer <institute_admin_token>
+Content-Type: application/json
+
+{
+  "name": "John Doe",
+  "email": "john@university.edu",
+  "password": "secure123",
+  "role": "STUDENT",
+  "bio": "Computer Science student",
+  "githubUsername": "johndoe"
+}
+
+PUT /api/institute-admin/users/:userId
+Authorization: Bearer <institute_admin_token>
+Content-Type: application/json
+
+{
+  "name": "Updated Name",
+  "email": "newemail@university.edu",
+  "bio": "Updated bio",
+  "role": "VERIFIER"
+}
+
+PUT /api/institute-admin/users/:userId/role
+Authorization: Bearer <institute_admin_token>
+Content-Type: application/json
+
+{
+  "newRole": "VERIFIER"
+}
+
+PUT /api/institute-admin/users/:userId/reset-password
+Authorization: Bearer <institute_admin_token>
+Content-Type: application/json
+
+{
+  "newPassword": "newSecurePassword123"
+}
+
+DELETE /api/institute-admin/users/:userId
+Authorization: Bearer <institute_admin_token>
+Content-Type: application/json
+
+{
+  "action": "remove"  // "remove" or "delete"
+}
+```
+
+#### Bulk User Operations
+```http
+POST /api/institute-admin/users/bulk-action
+Authorization: Bearer <institute_admin_token>
+Content-Type: application/json
+
+{
+  "action": "update-role",
+  "userIds": ["user1_id", "user2_id", "user3_id"],
+  "data": {
+    "newRole": "VERIFIER"
+  }
+}
+
+POST /api/institute-admin/users/bulk-import
+Authorization: Bearer <institute_admin_token>
+Content-Type: application/json
+
+{
+  "users": [
+    {
+      "name": "Alice Smith",
+      "email": "alice@university.edu",
+      "password": "password123",
+      "role": "STUDENT",
+      "bio": "Math student"
+    },
+    {
+      "name": "Bob Johnson",
+      "email": "bob@university.edu", 
+      "password": "password123",
+      "role": "VERIFIER",
+      "bio": "CS Professor"
+    }
+  ]
+}
+
+GET /api/institute-admin/users/export?format=csv&role=STUDENT
+Authorization: Bearer <institute_admin_token>
+```
+
+#### Association Request Management
+```http
+GET /api/institute-admin/association-requests?page=1&limit=10&status=PENDING
+Authorization: Bearer <institute_admin_token>
+
+PUT /api/institute-admin/association-requests/:requestId/respond
+Authorization: Bearer <institute_admin_token>
+Content-Type: application/json
+
+{
+  "action": "approve",
+  "response": "Welcome to Harvard University!"
+}
+```
+
+#### Institute Analytics
+```http
+GET /api/institute-admin/analytics
+Authorization: Bearer <institute_admin_token>
+```
+
+**Response:**
+```json
+{
+  "overview": {
+    "totalUsers": 1250,
+    "totalStudents": 1100,
+    "totalVerifiers": 150,
+    "pendingAssociations": 25
+  },
+  "recentUsers": [...],
+  "userGrowth": [...],
+  "roleDistribution": [...]
+}
+```
+
+### 🛡️ Admin Security Features
+
+- **🔐 Enhanced Password Security**: 8+ character minimum with bcrypt hashing
+- **🚫 Account Lockout**: 5 failed attempts = 2-4 hour lockout  
+- **⏰ Extended Sessions**: 8-hour admin tokens (vs 1-hour user tokens)
+- **🎯 Permission-Based Access**: Granular permission control for institute admins
+- **📊 Audit Trails**: Complete tracking of admin actions
+- **🔄 Separate Authentication**: Independent admin auth system
+
+### 🎯 Admin Workflow
+
+#### Super Admin Workflow:
+1. **Login** with default credentials
+2. **Change Password** for security
+3. **Create Institutions** with proper details
+4. **Create Institute Admins** for each institution
+5. **Monitor System Analytics** and manage platform
+
+#### Institute Admin Workflow:
+1. **Login** with credentials provided by Super Admin
+2. **View Institution Dashboard** and analytics
+3. **Manage Users** - approve associations, change roles
+4. **Handle Association Requests** from students
+5. **Monitor Institute Analytics** and user activity
+
+### 🔑 Permission System
+
+#### Super Admin Permissions (All Enabled):
+- ✅ Manage Institutions
+- ✅ Manage Institute Admins  
+- ✅ View System Analytics
+- ✅ Manage System Settings
+- ✅ Access All Data
+
+#### Institute Admin Permissions (Configurable):
+- 🔧 **manageUsers**: Add/remove/update users
+- 👥 **manageVerifiers**: Manage verifier accounts
+- 📊 **viewAnalytics**: Access institute analytics
+- ⚙️ **manageSettings**: Modify institute settings
+
+### 📱 Frontend Integration
+
+#### React Admin Dashboard Example:
+```jsx
+// Super Admin Dashboard
+const SuperAdminDashboard = () => {
+  const [institutions, setInstitutions] = useState([]);
+  const [analytics, setAnalytics] = useState({});
+
+  useEffect(() => {
+    fetchInstitutions();
+    fetchAnalytics();
+  }, []);
+
+  return (
+    <div className="admin-dashboard">
+      <h1>Super Admin Dashboard</h1>
+      <AnalyticsCards data={analytics} />
+      <InstitutionTable data={institutions} />
+      <CreateInstitutionModal />
+    </div>
+  );
+};
+
+// Institute Admin Dashboard  
+const InstituteAdminDashboard = () => {
+  const [users, setUsers] = useState([]);
+  const [pendingRequests, setPendingRequests] = useState([]);
+
+  return (
+    <div className="institute-dashboard">
+      <h1>Institute Admin Dashboard</h1>
+      <UserManagementTable users={users} />
+      <AssociationRequestsTable requests={pendingRequests} />
+    </div>
+  );
+};
+```
+
+## 📋 API Quick Reference
 
 ```
 src/

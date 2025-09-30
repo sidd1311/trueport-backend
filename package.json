@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "setup-admin": "node src/scripts/createDefaultSuperAdmin.js"
   },
   "keywords": [
     "career",
@@ -22,6 +23,7 @@
     "axios": "^1.5.0",
     "bcrypt": "^5.1.1",
     "cloudinary": "^1.40.0",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",

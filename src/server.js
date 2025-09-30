@@ -4,7 +4,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const session = require('express-session');
 require('dotenv').config();
-
+const cookieParser = require('cookie-parser'); 
 const connectDB = require('./config/db');
 const passport = require('./config/passport');
 
@@ -19,6 +19,10 @@ const verificationRoutes = require('./routes/verificationUnified');
 const verifierRoutes = require('./routes/verifier');
 const portfolioRoutes = require('./routes/portfolio');
 const githubRoutes = require('./routes/github');
+
+// Admin routes
+const superAdminRoutes = require('./routes/superAdmin');
+const instituteAdminRoutes = require('./routes/instituteAdmin');
 
 const app = express();
 
@@ -48,6 +52,7 @@ app.use(session({
 }));
 
 // Passport middleware
+app.use(cookieParser());
 app.use(passport.initialize());
 app.use(passport.session());
 
@@ -77,6 +82,10 @@ app.use('/api/verify', verificationRoutes);
 app.use('/api/verifier', verifierRoutes);
 app.use('/api/portfolio', portfolioRoutes);
 app.use('/api/github', githubRoutes);
+
+// Admin routes
+app.use('/api/super-admin', superAdminRoutes);
+app.use('/api/institute-admin', instituteAdminRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
