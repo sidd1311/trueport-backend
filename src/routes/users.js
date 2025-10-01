@@ -7,14 +7,162 @@ const router = express.Router();
 // Get current user profile
 router.get('/me', requireAuth, async (req, res) => {
   try {
+    // Explicitly fetch user with all contact fields to ensure they're included
+    const user = await User.findById(req.user._id)
+      .select('-passwordHash -githubToken');
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
     res.json({
-      user: req.user.toJSON()
+      user: user.toJSON()
     });
   } catch (error) {
     console.error('Get profile error:', error);
     res.status(500).json({ 
       message: 'Failed to fetch profile', 
       error: error.message 
+    });
+  }
+});
+
+// Get user's contact information with visibility settings
+router.get('/me/contact-info', requireAuth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id)
+      .select('email contactInfo contactVisibility githubUsername');
+
+    const contactInfo = {
+      email: user.email,
+      phone: user.contactInfo?.phone || '',
+      linkedinUrl: user.contactInfo?.linkedinUrl || '',
+      githubUsername: user.githubUsername || ''
+    };
+
+    const visibility = user.contactVisibility || {
+      email: true,
+      phone: false,
+      linkedinUrl: true,
+      githubUsername: true
+    };
+
+    res.json({
+      contactInfo,
+      visibility
+    });
+
+  } catch (error) {
+    console.error('Get contact info error:', error);
+    res.status(500).json({
+      message: 'Failed to fetch contact information',
+      error: error.message
+    });
+  }
+});
+
+// Update user's contact information
+router.put('/me/contact-info', requireAuth, async (req, res) => {
+  try {
+    const { phone, linkedinUrl } = req.body;
+
+    const updates = {};
+
+    // Validate and update phone
+    if (phone !== undefined) {
+      if (phone === '') {
+        updates['contactInfo.phone'] = '';
+      } else if (/^[+]?[\d\s\-()]+$/.test(phone.trim())) {
+        updates['contactInfo.phone'] = phone.trim();
+      } else {
+        return res.status(400).json({
+          message: 'Please enter a valid phone number'
+        });
+      }
+    }
+
+    // Validate and update LinkedIn URL
+    if (linkedinUrl !== undefined) {
+      if (linkedinUrl === '') {
+        updates['contactInfo.linkedinUrl'] = '';
+      } else {
+        const linkedinRegex = /^https:\/\/(www\.)?linkedin\.com\/in\/[a-zA-Z0-9\-]+\/?$/;
+        if (linkedinRegex.test(linkedinUrl.trim())) {
+          updates['contactInfo.linkedinUrl'] = linkedinUrl.trim();
+        } else {
+          return res.status(400).json({
+            message: 'Please enter a valid LinkedIn profile URL (e.g., https://linkedin.com/in/username)'
+          });
+        }
+      }
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { $set: updates },
+      { new: true, runValidators: true }
+    ).select('contactInfo');
+
+    res.json({
+      message: 'Contact information updated successfully',
+      contactInfo: {
+        phone: user.contactInfo?.phone || '',
+        linkedinUrl: user.contactInfo?.linkedinUrl || ''
+      }
+    });
+
+  } catch (error) {
+    console.error('Update contact info error:', error);
+    res.status(500).json({
+      message: 'Failed to update contact information',
+      error: error.message
+    });
+  }
+});
+
+// Update contact information visibility settings
+router.put('/me/contact-visibility', requireAuth, async (req, res) => {
+  try {
+    const { email, phone, linkedinUrl, githubUsername } = req.body;
+
+    const updates = {};
+
+    // Validate and update visibility settings
+    if (typeof email === 'boolean') {
+      updates['contactVisibility.email'] = email;
+    }
+    if (typeof phone === 'boolean') {
+      updates['contactVisibility.phone'] = phone;
+    }
+    if (typeof linkedinUrl === 'boolean') {
+      updates['contactVisibility.linkedinUrl'] = linkedinUrl;
+    }
+    if (typeof githubUsername === 'boolean') {
+      updates['contactVisibility.githubUsername'] = githubUsername;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({
+        message: 'At least one visibility setting must be provided'
+      });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { $set: updates },
+      { new: true, runValidators: true }
+    ).select('contactVisibility');
+
+    res.json({
+      message: 'Contact visibility settings updated successfully',
+      visibility: user.contactVisibility
+    });
+
+  } catch (error) {
+    console.error('Update contact visibility error:', error);
+    res.status(500).json({
+      message: 'Failed to update contact visibility settings',
+      error: error.message
     });
   }
 });
@@ -545,6 +693,433 @@ router.get('/profile-status', requireAuth, async (req, res) => {
     console.error('Get profile status error:', error);
     res.status(500).json({
       message: 'Failed to get profile status',
+      error: error.message
+    });
+  }
+});
+
+// Get portfolio settings
+router.get('/me/portfolio-settings', requireAuth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id)
+      .select('portfolioSettings');
+
+    res.json({
+      portfolioSettings: user.portfolioSettings || {
+        visibility: 'PUBLIC',
+        sections: {
+          showExperiences: true,
+          showEducation: true,
+          showProjects: true,
+          showGithubRepos: true,
+          showBio: true,
+          showInstitute: true
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Get portfolio settings error:', error);
+    res.status(500).json({
+      message: 'Failed to fetch portfolio settings',
+      error: error.message
+    });
+  }
+});
+
+// Update portfolio visibility and section settings
+router.put('/me/portfolio-settings', requireAuth, async (req, res) => {
+  try {
+    const { visibility, sections } = req.body;
+
+    const updates = {};
+
+    // Validate and update visibility
+    if (visibility && ['PUBLIC', 'PRIVATE', 'INSTITUTE_ONLY'].includes(visibility)) {
+      updates['portfolioSettings.visibility'] = visibility;
+    }
+
+    // Validate and update sections
+    if (sections && typeof sections === 'object') {
+      const allowedSections = [
+        'showExperiences', 'showEducation', 'showProjects', 
+        'showGithubRepos', 'showBio', 'showInstitute'
+      ];
+
+      allowedSections.forEach(section => {
+        if (typeof sections[section] === 'boolean') {
+          updates[`portfolioSettings.sections.${section}`] = sections[section];
+        }
+      });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { $set: updates },
+      { new: true, runValidators: true }
+    ).select('portfolioSettings');
+
+    res.json({
+      message: 'Portfolio settings updated successfully',
+      portfolioSettings: user.portfolioSettings
+    });
+
+  } catch (error) {
+    console.error('Update portfolio settings error:', error);
+    res.status(500).json({
+      message: 'Failed to update portfolio settings',
+      error: error.message
+    });
+  }
+});
+
+// Toggle individual item visibility (experiences, education, projects)
+router.put('/me/portfolio-item/:itemType/:itemId/visibility', requireAuth, async (req, res) => {
+  try {
+    const { itemType, itemId } = req.params;
+    const { isPublic } = req.body;
+
+    // Validate itemType and get corresponding model
+    let Model;
+    switch (itemType) {
+      case 'experience':
+        Model = require('../models/Experience');
+        break;
+      case 'education':
+        Model = require('../models/Education');
+        break;
+      case 'project':
+        Model = require('../models/GithubProject');
+        break;
+      default:
+        return res.status(400).json({
+          message: 'Invalid item type. Must be experience, education, or project'
+        });
+    }
+
+    // Validate isPublic
+    if (typeof isPublic !== 'boolean') {
+      return res.status(400).json({
+        message: 'isPublic must be a boolean value'
+      });
+    }
+
+    // Find and update the item
+    const item = await Model.findOneAndUpdate(
+      { _id: itemId, userId: req.user._id },
+      { isPublic: isPublic },
+      { new: true }
+    );
+
+    if (!item) {
+      return res.status(404).json({
+        message: `${itemType} not found or you don't have permission to edit it`
+      });
+    }
+
+    res.json({
+      message: `${itemType} visibility updated successfully`,
+      item: {
+        id: item._id,
+        title: item.title || item.courseName || item.projectName,
+        isPublic: item.isPublic
+      }
+    });
+
+  } catch (error) {
+    console.error('Update item visibility error:', error);
+    res.status(500).json({
+      message: 'Failed to update item visibility',
+      error: error.message
+    });
+  }
+});
+
+// Bulk update visibility for multiple items
+router.put('/me/portfolio-items/bulk-visibility', requireAuth, async (req, res) => {
+  try {
+    const { updates } = req.body;
+
+    // Validate updates array
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return res.status(400).json({
+        message: 'updates must be a non-empty array'
+      });
+    }
+
+    const results = {
+      success: [],
+      failed: []
+    };
+
+    for (const update of updates) {
+      try {
+        const { itemType, itemId, isPublic } = update;
+
+        // Get corresponding model
+        let Model;
+        switch (itemType) {
+          case 'experience':
+            Model = require('../models/Experience');
+            break;
+          case 'education':
+            Model = require('../models/Education');
+            break;
+          case 'project':
+            Model = require('../models/GithubProject');
+            break;
+          default:
+            results.failed.push({
+              itemId,
+              itemType,
+              error: 'Invalid item type'
+            });
+            continue;
+        }
+
+        // Update the item
+        const item = await Model.findOneAndUpdate(
+          { _id: itemId, userId: req.user._id },
+          { isPublic: isPublic },
+          { new: true }
+        );
+
+        if (item) {
+          results.success.push({
+            itemId: item._id,
+            itemType,
+            isPublic: item.isPublic
+          });
+        } else {
+          results.failed.push({
+            itemId,
+            itemType,
+            error: 'Item not found or no permission'
+          });
+        }
+
+      } catch (error) {
+        results.failed.push({
+          itemId: update.itemId,
+          itemType: update.itemType,
+          error: error.message
+        });
+      }
+    }
+
+    res.json({
+      message: `Bulk update completed. Success: ${results.success.length}, Failed: ${results.failed.length}`,
+      results
+    });
+
+  } catch (error) {
+    console.error('Bulk update visibility error:', error);
+    res.status(500).json({
+      message: 'Failed to update items visibility',
+      error: error.message
+    });
+  }
+});
+
+// Get all user's items with visibility status for management
+router.get('/me/portfolio-items', requireAuth, async (req, res) => {
+  try {
+    const Experience = require('../models/Experience');
+    const Education = require('../models/Education');
+    const GithubProject = require('../models/GithubProject');
+
+    // Get all experiences with visibility status
+    const experiences = await Experience.find({ userId: req.user._id })
+      .select('title description role startDate endDate verified isPublic createdAt')
+      .sort({ createdAt: -1 });
+
+    // Get all education entries with visibility status
+    const education = await Education.find({ userId: req.user._id })
+      .select('courseName courseType boardOrUniversity passingYear verified isPublic createdAt')
+      .sort({ passingYear: -1, createdAt: -1 });
+
+    // Get all projects with visibility status
+    const projects = await GithubProject.find({ userId: req.user._id })
+      .select('projectName description technologies projectType verified isPublic createdAt')
+      .sort({ createdAt: -1 });
+
+    res.json({
+      experiences: experiences.map(exp => ({
+        id: exp._id,
+        title: exp.title,
+        description: exp.description,
+        role: exp.role,
+        startDate: exp.startDate,
+        endDate: exp.endDate,
+        verified: exp.verified,
+        isPublic: exp.isPublic,
+        createdAt: exp.createdAt,
+        type: 'experience'
+      })),
+      education: education.map(edu => ({
+        id: edu._id,
+        title: edu.courseName,
+        courseType: edu.courseType,
+        institution: edu.boardOrUniversity,
+        passingYear: edu.passingYear,
+        verified: edu.verified,
+        isPublic: edu.isPublic,
+        createdAt: edu.createdAt,
+        type: 'education'
+      })),
+      projects: projects.map(proj => ({
+        id: proj._id,
+        title: proj.projectName,
+        description: proj.description,
+        technologies: proj.technologies,
+        projectType: proj.projectType,
+        verified: proj.verified,
+        isPublic: proj.isPublic,
+        createdAt: proj.createdAt,
+        type: 'project'
+      }))
+    });
+
+  } catch (error) {
+    console.error('Get portfolio items error:', error);
+    res.status(500).json({
+      message: 'Failed to fetch portfolio items',
+      error: error.message
+    });
+  }
+});
+
+// Get user's own portfolio preview (respects visibility settings)
+router.get('/me/portfolio-preview', requireAuth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id)
+      .select('name email githubUsername bio institute profileJson createdAt role portfolioSettings contactInfo contactVisibility');
+
+    const settings = user.portfolioSettings || {
+      visibility: 'PUBLIC',
+      sections: {
+        showExperiences: true,
+        showEducation: true,
+        showProjects: true,
+        showGithubRepos: true,
+        showBio: true,
+        showInstitute: true
+      }
+    };
+
+    const contactVisibility = user.contactVisibility || {
+      email: true,
+      phone: false,
+      linkedinUrl: true,
+      githubUsername: true
+    };
+
+    const response = {
+      user: {
+        id: user._id,
+        name: user.name,
+        role: user.role,
+        createdAt: user.createdAt,
+        contactInfo: {}
+      },
+      visibility: settings.visibility,
+      sections: {}
+    };
+
+    // Add sections based on visibility settings
+    if (settings.sections.showBio) {
+      response.user.bio = user.bio;
+    }
+
+    if (settings.sections.showInstitute) {
+      response.user.institute = user.institute;
+    }
+
+    // Add contact information based on individual visibility settings
+    let hasVisibleContactInfo = false;
+
+    if (contactVisibility.email && user.email) {
+      response.user.contactInfo.email = user.email;
+      hasVisibleContactInfo = true;
+    }
+
+    if (contactVisibility.phone && user.contactInfo?.phone) {
+      response.user.contactInfo.phone = user.contactInfo.phone;
+      hasVisibleContactInfo = true;
+    }
+
+    if (contactVisibility.linkedinUrl && user.contactInfo?.linkedinUrl) {
+      response.user.contactInfo.linkedinUrl = user.contactInfo.linkedinUrl;
+      hasVisibleContactInfo = true;
+    }
+
+    if (contactVisibility.githubUsername && user.githubUsername) {
+      response.user.contactInfo.githubUsername = user.githubUsername;
+      hasVisibleContactInfo = true;
+    }
+
+    // Remove contactInfo object if no contact information is visible
+    if (!hasVisibleContactInfo) {
+      delete response.user.contactInfo;
+    }
+
+    // Get experiences (only public ones for portfolio)
+    if (settings.sections.showExperiences) {
+      const Experience = require('../models/Experience');
+      
+      response.sections.experiences = await Experience.find({
+        userId: req.user._id,
+        verified: true,
+        isPublic: true
+      }).sort({ verifiedAt: -1 });
+    }
+
+    // Get education (only public ones for portfolio)
+    if (settings.sections.showEducation) {
+      const Education = require('../models/Education');
+      
+      response.sections.education = await Education.find({
+        userId: req.user._id,
+        verified: true,
+        isPublic: true
+      }).sort({ passingYear: -1, createdAt: -1 });
+    }
+
+    // Get projects (only public ones for portfolio)
+    if (settings.sections.showProjects) {
+      const GithubProject = require('../models/GithubProject');
+      
+      response.sections.projects = await GithubProject.find({
+        userId: req.user._id,
+        verified: true,
+        isPublic: true
+      }).sort({ createdAt: -1 });
+    }
+
+    // Get GitHub repos (if enabled, GitHub username exists, and GitHub username is visible)
+    if (settings.sections.showGithubRepos && user.githubUsername && contactVisibility.githubUsername) {
+      try {
+        const axios = require('axios');
+        const githubResponse = await axios.get(
+          `https://api.github.com/users/${user.githubUsername}/repos`,
+          {
+            params: { sort: 'updated', per_page: 10 },
+            timeout: 5000
+          }
+        );
+        response.sections.githubRepos = githubResponse.data;
+      } catch (githubError) {
+        console.warn('GitHub API error:', githubError.message);
+        response.sections.githubRepos = [];
+      }
+    }
+
+    res.json(response);
+
+  } catch (error) {
+    console.error('Get portfolio preview error:', error);
+    res.status(500).json({
+      message: 'Failed to fetch portfolio preview',
       error: error.message
     });
   }

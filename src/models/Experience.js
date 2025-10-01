@@ -69,6 +69,10 @@ const experienceSchema = new mongoose.Schema({
     trim: true,
     maxLength: 1000
   },
+  isPublic: {
+    type: Boolean,
+    default: true // By default, experiences are public
+  },
   createdAt: {
     type: Date,
     default: Date.now

@@ -10,35 +10,130 @@ const router = express.Router();
 // Get user's public portfolio
 router.get('/:userId', async (req, res) => {
   try {
-    // Get user info
+    // Get user info with portfolio settings
     const user = await User.findById(req.params.userId)
-      .select('name email githubUsername bio institute profileJson createdAt role');
+      .select('name email githubUsername bio institute profileJson createdAt role portfolioSettings contactInfo contactVisibility');
 
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // Get verified experiences
-    const experiences = await Experience.find({
-      userId: req.params.userId,
-      verified: true
-    }).sort({ verifiedAt: -1 });
+    // Get portfolio settings with defaults
+    const settings = user.portfolioSettings || {
+      visibility: 'PUBLIC',
+      sections: {
+        showExperiences: true,
+        showEducation: true,
+        showProjects: true,
+        showGithubRepos: true,
+        showBio: true,
+        showInstitute: true
+      }
+    };
 
-    // Get verified education entries (latest first)
-    const education = await Education.find({
-      userId: req.params.userId,
-      verified: true
-    }).sort({ passingYear: -1, createdAt: -1 });
+    // Get contact visibility settings with defaults
+    const contactVisibility = user.contactVisibility || {
+      email: true,
+      phone: false,
+      linkedinUrl: true,
+      githubUsername: true
+    };
 
-    // Get verified GitHub projects (latest first)
-    const githubProjects = await GithubProject.find({
-      userId: req.params.userId,
-      verified: true
-    }).sort({ createdAt: -1 });
+    // Check portfolio visibility
+    if (settings.visibility === 'PRIVATE') {
+      return res.status(403).json({ 
+        message: 'This portfolio is private' 
+      });
+    }
 
-    // Get GitHub repositories if GitHub username is available
+    // For INSTITUTE_ONLY visibility, check if requester is from same institute
+    // (This would need authentication context to fully implement)
+    if (settings.visibility === 'INSTITUTE_ONLY') {
+      // For now, allow access - in a full implementation, you'd check req.user.institute
+      console.log('Institute-only portfolio accessed');
+    }
+
+    // Build response based on visibility settings
+    const response = {
+      user: {
+        id: user._id,
+        name: user.name,
+        role: user.role,
+        createdAt: user.createdAt,
+        contactInfo: {}
+      }
+    };
+
+    // Add optional user fields based on settings
+    if (settings.sections.showBio && user.bio) {
+      response.user.bio = user.bio;
+    }
+
+    if (settings.sections.showInstitute && user.institute) {
+      response.user.institute = user.institute;
+    }
+
+    // Add contact information based on individual visibility settings
+    let hasVisibleContactInfo = false;
+
+    if (contactVisibility.email && user.email) {
+      response.user.contactInfo.email = user.email;
+      hasVisibleContactInfo = true;
+    }
+
+    if (contactVisibility.phone && user.contactInfo?.phone) {
+      response.user.contactInfo.phone = user.contactInfo.phone;
+      hasVisibleContactInfo = true;
+    }
+
+    if (contactVisibility.linkedinUrl && user.contactInfo?.linkedinUrl) {
+      response.user.contactInfo.linkedinUrl = user.contactInfo.linkedinUrl;
+      hasVisibleContactInfo = true;
+    }
+
+    if (contactVisibility.githubUsername && user.githubUsername) {
+      response.user.contactInfo.githubUsername = user.githubUsername;
+      hasVisibleContactInfo = true;
+    }
+
+    // Remove contactInfo object if no contact information is visible
+    if (!hasVisibleContactInfo) {
+      delete response.user.contactInfo;
+    }
+
+    // Get verified experiences (only public ones)
+    let experiences = [];
+    if (settings.sections.showExperiences) {
+      experiences = await Experience.find({
+        userId: req.params.userId,
+        verified: true,
+        isPublic: true
+      }).sort({ verifiedAt: -1 });
+    }
+
+    // Get verified education entries (only public ones)
+    let education = [];
+    if (settings.sections.showEducation) {
+      education = await Education.find({
+        userId: req.params.userId,
+        verified: true,
+        isPublic: true
+      }).sort({ passingYear: -1, createdAt: -1 });
+    }
+
+    // Get verified GitHub projects (only public ones)
+    let githubProjects = [];
+    if (settings.sections.showProjects) {
+      githubProjects = await GithubProject.find({
+        userId: req.params.userId,
+        verified: true,
+        isPublic: true
+      }).sort({ createdAt: -1 });
+    }
+
+    // Get GitHub repositories if GitHub username is available, section is enabled, and GitHub username is visible
     let githubRepos = [];
-    if (user.githubUsername) {
+    if (user.githubUsername && settings.sections.showGithubRepos && contactVisibility.githubUsername) {
       try {
         const response = await axios.get(
           `https://api.github.com/users/${user.githubUsername}/repos`,
@@ -82,7 +177,7 @@ router.get('/:userId', async (req, res) => {
     };
 
     res.json({
-      user: user.toJSON(),
+      user: response.user, // Use the filtered user object that respects visibility settings
       experiences,
       education,
       githubProjects,

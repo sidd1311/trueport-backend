@@ -88,6 +88,10 @@ const educationSchema = new mongoose.Schema({
     trim: true,
     maxLength: 1000
   },
+  isPublic: {
+    type: Boolean,
+    default: true // By default, education entries are public
+  },
   createdAt: {
     type: Date,
     default: Date.now
