@@ -23,7 +23,25 @@ router.get('/me', requireAuth, async (req, res) => {
 router.put('/me', requireAuth, async (req, res) => {
   try {
     const updates = {};
-    const allowedUpdates = ['name', 'githubUsername', 'bio', 'institute', 'profileJson', 'role'];
+    const baseAllowedUpdates = ['name', 'githubUsername', 'bio', 'institute', 'profileJson', 'role'];
+    let allowedUpdates = [...baseAllowedUpdates];
+    const restrictedFields = [];
+    
+    // If user's association is approved, restrict institute updates
+    if (req.user.associationStatus === 'APPROVED') {
+      allowedUpdates = allowedUpdates.filter(field => field !== 'institute');
+      if (req.body.institute !== undefined) {
+        restrictedFields.push('institute');
+      }
+    }
+    
+    // Check if user is trying to update restricted fields
+    if (restrictedFields.length > 0) {
+      return res.status(403).json({ 
+        message: `The following fields cannot be updated because your association is approved: ${restrictedFields.join(', ')}`,
+        restrictedFields
+      });
+    }
     
     // Only include allowed fields
     allowedUpdates.forEach(field => {

@@ -179,7 +179,112 @@ const sendVerificationDecisionEmail = async (studentEmail, itemTitle, itemType, 
   }
 };
 
+const sendWelcomeEmailWithCredentials = async (userEmail, userName, password, institutionName) => {
+  const loginUrl = `${process.env.FRONTEND_URL}/login`;
+  
+  const emailData = {
+    from: process.env.FROM_EMAIL || 'TruePortMe <onboarding@resend.dev>',
+    to: [userEmail],
+    subject: '🎉 Welcome to TruePortMe - Your Account Has Been Created',
+    html: `
+      <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff;">
+        <!-- Header -->
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; text-align: center;">
+          <h1 style="color: white; margin: 0; font-size: 24px;">TruePortMe</h1>
+          <p style="color: rgba(255,255,255,0.9); margin: 5px 0 0 0; font-size: 14px;">Portfolio Verification System</p>
+        </div>
+        
+        <!-- Main Content -->
+        <div style="padding: 30px 20px;">
+          <h2 style="color: #333; margin: 0 0 20px 0; font-size: 20px;">Welcome to TruePortMe!</h2>
+          
+          <p style="color: #555; font-size: 16px; line-height: 1.5;">Hello <strong>${userName}</strong>,</p>
+          <p style="color: #555; font-size: 16px; line-height: 1.5;">
+            Your account has been successfully created by the administrators at <strong>${institutionName}</strong>. 
+            You can now access your TruePortMe account using the credentials below.
+          </p>
+          
+          <!-- Credentials Card -->
+          <div style="background: #f8f9fa; border: 2px solid #e9ecef; border-radius: 8px; padding: 20px; margin: 20px 0;">
+            <h3 style="margin: 0 0 15px 0; color: #495057; font-size: 18px;">Your Login Credentials</h3>
+            <div style="margin: 10px 0;">
+              <strong style="color: #333;">Email:</strong> 
+              <span style="color: #007bff; font-family: monospace;">${userEmail}</span>
+            </div>
+            <div style="margin: 10px 0;">
+              <strong style="color: #333;">Password:</strong> 
+              <span style="background: #e9ecef; padding: 4px 8px; border-radius: 4px; font-family: monospace; color: #495057;">${password}</span>
+            </div>
+          </div>
+          
+          <!-- Security Notice -->
+          <div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 6px; padding: 15px; margin: 20px 0;">
+            <h4 style="margin: 0 0 10px 0; color: #856404; font-size: 14px;">🔒 Security Notice</h4>
+            <p style="margin: 0; color: #856404; font-size: 14px;">
+              For your security, we recommend changing your password after your first login. 
+              Please keep your credentials secure and do not share them with anyone.
+            </p>
+          </div>
+          
+          <!-- Action Button -->
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${loginUrl}" 
+               style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 14px 28px; 
+                      text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold; 
+                      font-size: 16px; transition: all 0.3s ease;">
+              Login to Your Account
+            </a>
+          </div>
+          
+          <!-- Getting Started -->
+          <div style="background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 20px 0;">
+            <h4 style="margin: 0 0 15px 0; color: #495057;">Getting Started</h4>
+            <ul style="color: #555; font-size: 14px; line-height: 1.6; margin: 0; padding-left: 20px;">
+              <li>Complete your profile setup</li>
+              <li>Add your experiences and education</li>
+              <li>Upload your projects for verification</li>
+              <li>Build your verified digital portfolio</li>
+            </ul>
+          </div>
+        </div>
+        
+        <!-- Footer -->
+        <div style="background: #f8f9fa; padding: 20px; text-align: center; border-top: 1px solid #e9ecef;">
+          <p style="color: #6c757d; font-size: 12px; margin: 0;">
+            This email was sent by TruePortMe. If you have any questions, please contact your institution administrator.
+          </p>
+        </div>
+      </div>
+    `
+  };
+
+  try {
+    if (resend && process.env.RESEND_API_KEY) {
+      const { data, error } = await resend.emails.send(emailData);
+      
+      if (error) {
+        console.error('❌ Resend API error:', error);
+        return false;
+      }
+      
+      console.log(`✅ Welcome email sent to ${userEmail} (ID: ${data.id})`);
+    } else {
+      // Fallback to console.log for development
+      console.log('📧 Welcome email would be sent (no Resend API key configured):');
+      console.log(`To: ${userEmail}`);
+      console.log(`Subject: ${emailData.subject}`);
+      console.log(`Name: ${userName}`);
+      console.log(`Password: ${password}`);
+    }
+    return true;
+  } catch (error) {
+    console.error('❌ Welcome email sending failed:', error);
+    return false;
+  }
+};
+
 module.exports = {
   sendVerificationEmail,
-  sendVerificationDecisionEmail
+  sendVerificationDecisionEmail,
+  sendWelcomeEmailWithCredentials
 };

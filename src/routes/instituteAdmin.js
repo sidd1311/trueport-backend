@@ -1,11 +1,170 @@
 const express = require('express');
+const multer = require('multer');
+const csv = require('csv-parser');
+const fs = require('fs');
+const path = require('path');
+const axios = require('axios');
+const { Readable } = require('stream');
 const InstituteAdmin = require('../models/InstituteAdmin');
 const Institution = require('../models/Institution');
 const User = require('../models/User');
 const AssociationRequest = require('../models/AssociationRequest');
 const { generateAdminToken, requireInstituteAdmin, requirePermission } = require('../middlewares/adminAuth');
+const { generatePassword } = require('../utils/passwordGenerator');
+const { sendWelcomeEmailWithCredentials } = require('../utils/email');
 
 const router = express.Router();
+
+// Configure multer for CSV file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = path.join(__dirname, '../../uploads/temp');
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    // Generate unique filename with timestamp
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'bulk-import-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
+  },
+  fileFilter: function (req, file, cb) {
+    // Check file type
+    if (file.mimetype === 'text/csv' || 
+        file.mimetype === 'application/csv' ||
+        file.mimetype === 'application/vnd.ms-excel' ||
+        path.extname(file.originalname).toLowerCase() === '.csv') {
+      cb(null, true);
+    } else {
+      cb(new Error('Only CSV files are allowed'), false);
+    }
+  }
+});
+
+// Helper function to parse CSV file from local path
+const parseCsvFile = (filePath) => {
+  return new Promise((resolve, reject) => {
+    const results = [];
+    fs.createReadStream(filePath)
+      .pipe(csv({
+        mapHeaders: ({ header }) => header.trim().toLowerCase().replace(/\s+/g, '')
+      }))
+      .on('data', (data) => {
+        // Map CSV columns to expected format
+        const userData = {
+          name: data.name?.trim(),
+          email: data.email?.trim(),
+          role: data.role?.trim()?.toUpperCase(),
+          bio: data.bio?.trim() || undefined,
+          githubUsername: data.githubusername?.trim() || data['github username']?.trim() || undefined
+        };
+        
+        // Only add if required fields are present
+        if (userData.name && userData.email && userData.role) {
+          results.push(userData);
+        }
+      })
+      .on('end', () => {
+        resolve(results);
+      })
+      .on('error', (error) => {
+        reject(error);
+      });
+  });
+};
+
+// Helper function to parse CSV from URL
+const parseCsvFromUrl = async (csvUrl) => {
+  return new Promise(async (resolve, reject) => {
+    try {
+      // Validate URL
+      const url = new URL(csvUrl);
+      if (!['http:', 'https:'].includes(url.protocol)) {
+        throw new Error('Only HTTP and HTTPS URLs are allowed');
+      }
+
+      // Fetch CSV data from URL
+      const response = await axios.get(csvUrl, {
+        responseType: 'stream',
+        timeout: 30000, // 30 second timeout
+        maxContentLength: 5 * 1024 * 1024, // 5MB limit
+        headers: {
+          'User-Agent': 'TruePortMe-Backend/1.0'
+        }
+      });
+
+      // Check content type
+      const contentType = response.headers['content-type'] || '';
+      if (!contentType.includes('text/csv') && 
+          !contentType.includes('application/csv') && 
+          !contentType.includes('text/plain')) {
+        console.warn(`Warning: Unexpected content type ${contentType} for CSV URL`);
+      }
+
+      const results = [];
+      
+      // Parse CSV stream
+      response.data
+        .pipe(csv({
+          mapHeaders: ({ header }) => header.trim().toLowerCase().replace(/\s+/g, '')
+        }))
+        .on('data', (data) => {
+          // Map CSV columns to expected format
+          const userData = {
+            name: data.name?.trim(),
+            email: data.email?.trim(),
+            role: data.role?.trim()?.toUpperCase(),
+            bio: data.bio?.trim() || undefined,
+            githubUsername: data.githubusername?.trim() || data['github username']?.trim() || undefined
+          };
+          
+          // Only add if required fields are present
+          if (userData.name && userData.email && userData.role) {
+            results.push(userData);
+          }
+        })
+        .on('end', () => {
+          resolve(results);
+        })
+        .on('error', (error) => {
+          reject(new Error(`CSV parsing error: ${error.message}`));
+        });
+
+    } catch (error) {
+      if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+        reject(new Error('Unable to reach the CSV URL. Please check the URL and try again.'));
+      } else if (error.code === 'ETIMEDOUT') {
+        reject(new Error('Request timeout. The CSV file might be too large or the server is slow.'));
+      } else if (error.response && error.response.status === 404) {
+        reject(new Error('CSV file not found at the provided URL.'));
+      } else if (error.response && error.response.status >= 400) {
+        reject(new Error(`Failed to fetch CSV: HTTP ${error.response.status}`));
+      } else {
+        reject(new Error(`Failed to fetch CSV from URL: ${error.message}`));
+      }
+    }
+  });
+};
+
+// Helper function to clean up uploaded file
+const cleanupFile = (filePath) => {
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  } catch (error) {
+    console.error('Error cleaning up file:', error);
+  }
+};
 
 // Institute Admin Login
 router.post('/login', async (req, res) => {
@@ -710,13 +869,75 @@ router.post('/users/bulk-action', requireInstituteAdmin, requirePermission('mana
 });
 
 // Import Users from CSV/Excel (Bulk Create)
-router.post('/users/bulk-import', requireInstituteAdmin, requirePermission('manageUsers'), async (req, res) => {
+router.post('/users/bulk-import', requireInstituteAdmin, requirePermission('manageUsers'), upload.single('csvFile'), async (req, res) => {
+  let filePath = null;
+  
   try {
-    const { users } = req.body; // Array of user objects
-
-    if (!users || !Array.isArray(users) || users.length === 0) {
+    let users = [];
+    
+    // Check if CSV URL was provided (frontend sends CSV URL)
+    if (req.body.csvUrl) {
+      const { csvUrl } = req.body;
+      
+      if (typeof csvUrl !== 'string' || !csvUrl.trim()) {
+        return res.status(400).json({
+          message: 'CSV URL must be a valid string'
+        });
+      }
+      
+      try {
+        console.log(`Fetching CSV from URL: ${csvUrl}`);
+        users = await parseCsvFromUrl(csvUrl.trim());
+        
+        if (users.length === 0) {
+          return res.status(400).json({
+            message: 'CSV file is empty or contains no valid user data. Please ensure the CSV has the required columns: Name, Email, Role'
+          });
+        }
+        
+        console.log(`Successfully parsed ${users.length} users from CSV URL`);
+      } catch (csvError) {
+        console.error('CSV URL parsing error:', csvError);
+        return res.status(400).json({
+          message: csvError.message || 'Failed to fetch and parse CSV from URL. Please ensure the URL is accessible and the file is properly formatted.',
+          error: csvError.message
+        });
+      }
+    }
+    // Check if CSV file was uploaded (fallback for direct upload)
+    else if (req.file) {
+      filePath = req.file.path;
+      
+      try {
+        users = await parseCsvFile(filePath);
+        
+        if (users.length === 0) {
+          return res.status(400).json({
+            message: 'CSV file is empty or contains no valid user data. Please ensure the CSV has the required columns: Name, Email, Role'
+          });
+        }
+      } catch (csvError) {
+        console.error('CSV file parsing error:', csvError);
+        return res.status(400).json({
+          message: 'Failed to parse CSV file. Please ensure it is properly formatted.',
+          error: csvError.message
+        });
+      }
+    }
+    // Handle JSON array format (existing functionality)
+    else if (req.body.users && Array.isArray(req.body.users)) {
+      users = req.body.users;
+      
+      if (users.length === 0) {
+        return res.status(400).json({
+          message: 'Users array cannot be empty'
+        });
+      }
+    }
+    // No valid input provided
+    else {
       return res.status(400).json({
-        message: 'Users array is required and cannot be empty'
+        message: 'Please provide either a CSV URL (csvUrl), upload a CSV file, or provide a users array in the request body'
       });
     }
 
@@ -726,21 +947,29 @@ router.post('/users/bulk-import', requireInstituteAdmin, requirePermission('mana
       });
     }
 
+    // Get institution details for email
+    const institution = await Institution.findOne({ slug: req.admin.institution });;
+    const institutionName = institution ? institution.name : 'Your Institution';
+
     const results = {
       created: [],
       failed: [],
-      duplicates: []
+      duplicates: [],
+      emailResults: {
+        sent: 0,
+        failed: 0
+      }
     };
 
     for (const userData of users) {
       try {
-        const { name, email, password, role, bio, githubUsername } = userData;
+        const { name, email, role, bio, githubUsername } = userData;
 
-        // Validation
-        if (!name || !email || !password || !role) {
+        // Validation - password is no longer required in input
+        if (!name || !email || !role) {
           results.failed.push({
             email: email || 'unknown',
-            error: 'Missing required fields (name, email, password, role)'
+            error: 'Missing required fields (name, email, role)'
           });
           continue;
         }
@@ -749,14 +978,6 @@ router.post('/users/bulk-import', requireInstituteAdmin, requirePermission('mana
           results.failed.push({
             email,
             error: 'Invalid role. Must be STUDENT or VERIFIER'
-          });
-          continue;
-        }
-
-        if (password.length < 6) {
-          results.failed.push({
-            email,
-            error: 'Password must be at least 6 characters long'
           });
           continue;
         }
@@ -771,11 +992,20 @@ router.post('/users/bulk-import', requireInstituteAdmin, requirePermission('mana
           continue;
         }
 
+        // Generate password automatically
+        const generatedPassword = generatePassword(12, {
+          includeUppercase: true,
+          includeLowercase: true,
+          includeNumbers: true,
+          includeSymbols: false, // Exclude symbols for easier typing
+          excludeSimilar: true
+        });
+
         // Create user
         const newUser = new User({
           name: name.trim(),
           email: email.toLowerCase().trim(),
-          passwordHash: password,
+          passwordHash: generatedPassword,
           role,
           institute: req.admin.institution,
           bio: bio ? bio.trim() : undefined,
@@ -793,8 +1023,28 @@ router.post('/users/bulk-import', requireInstituteAdmin, requirePermission('mana
         results.created.push({
           email: newUser.email,
           name: newUser.name,
-          role: newUser.role
+          role: newUser.role,
+          password: generatedPassword // Include generated password in response
         });
+
+        // Send welcome email with credentials
+        try {
+          const emailSent = await sendWelcomeEmailWithCredentials(
+            newUser.email,
+            newUser.name,
+            generatedPassword,
+            institutionName
+          );
+          
+          if (emailSent) {
+            results.emailResults.sent++;
+          } else {
+            results.emailResults.failed++;
+          }
+        } catch (emailError) {
+          console.error(`Failed to send welcome email to ${newUser.email}:`, emailError);
+          results.emailResults.failed++;
+        }
 
       } catch (error) {
         results.failed.push({
@@ -809,15 +1059,38 @@ router.post('/users/bulk-import', requireInstituteAdmin, requirePermission('mana
       await Institution.updateStats(req.admin.institution);
     }
 
+    // Generate CSV with passwords for successful creations
+    let csvContent = '';
+    if (results.created.length > 0) {
+      const csvHeaders = 'Name,Email,Role,Password\n';
+      const csvRows = results.created.map(user => 
+        `"${user.name}","${user.email}","${user.role}","${user.password}"`
+      ).join('\n');
+      csvContent = csvHeaders + csvRows;
+    }
+
     res.json({
-      message: `Bulk import completed. Created: ${results.created.length}, Failed: ${results.failed.length}, Duplicates: ${results.duplicates.length}`,
+      message: `Bulk import completed. Created: ${results.created.length}, Failed: ${results.failed.length}, Duplicates: ${results.duplicates.length}. Emails sent: ${results.emailResults.sent}, Email failures: ${results.emailResults.failed}`,
       summary: {
         totalProcessed: users.length,
         created: results.created.length,
         failed: results.failed.length,
-        duplicates: results.duplicates.length
+        duplicates: results.duplicates.length,
+        emailsSent: results.emailResults.sent,
+        emailsFailed: results.emailResults.failed,
+        dataSource: req.body.csvUrl ? 'CSV_URL' : (req.file ? 'CSV_UPLOAD' : 'JSON_ARRAY')
       },
-      results
+      results: {
+        created: results.created.map(user => ({
+          email: user.email,
+          name: user.name,
+          role: user.role
+          // Password removed from results for security (available in CSV)
+        })),
+        failed: results.failed,
+        duplicates: results.duplicates
+      },
+      csvData: csvContent // CSV with passwords for download
     });
 
   } catch (error) {
@@ -826,6 +1099,11 @@ router.post('/users/bulk-import', requireInstituteAdmin, requirePermission('mana
       message: 'Failed to import users',
       error: error.message
     });
+  } finally {
+    // Clean up uploaded file
+    if (filePath) {
+      cleanupFile(filePath);
+    }
   }
 });
 
@@ -834,8 +1112,8 @@ router.get('/users/export', requireInstituteAdmin, requirePermission('viewAnalyt
   try {
     const { format = 'json', role } = req.query;
 
-    let query = { institute: req.admin.institution };
-    
+let query = { instituteSlug: req.admin.institution }; 
+
     if (role) {
       query.role = role;
     }
