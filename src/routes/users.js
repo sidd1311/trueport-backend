@@ -23,25 +23,7 @@ router.get('/me', requireAuth, async (req, res) => {
 router.put('/me', requireAuth, async (req, res) => {
   try {
     const updates = {};
-    const baseAllowedUpdates = ['name', 'githubUsername', 'bio', 'institute', 'profileJson', 'role'];
-    let allowedUpdates = [...baseAllowedUpdates];
-    const restrictedFields = [];
-    
-    // If user's association is approved, restrict institute updates
-    if (req.user.associationStatus === 'APPROVED') {
-      allowedUpdates = allowedUpdates.filter(field => field !== 'institute');
-      if (req.body.institute !== undefined) {
-        restrictedFields.push('institute');
-      }
-    }
-    
-    // Check if user is trying to update restricted fields
-    if (restrictedFields.length > 0) {
-      return res.status(403).json({ 
-        message: `The following fields cannot be updated because your association is approved: ${restrictedFields.join(', ')}`,
-        restrictedFields
-      });
-    }
+    const allowedUpdates = ['name', 'githubUsername', 'bio', 'institute', 'profileJson', 'role'];
     
     // Only include allowed fields
     allowedUpdates.forEach(field => {
@@ -141,6 +123,63 @@ router.put('/me', requireAuth, async (req, res) => {
     res.status(500).json({ 
       message: 'Failed to update profile', 
       error: error.message 
+    });
+  }
+});
+
+// Get list of institutions for association requests
+router.get('/institutions', async (req, res) => {
+  try {
+    const { search } = req.query;
+
+    // Build match criteria
+    const matchCriteria = {
+      institute: { $exists: true, $ne: null, $ne: '' },
+      associationStatus: 'APPROVED' // Only show institutions with approved users
+    };
+
+    // Add search if provided
+    if (search && search.trim().length > 0) {
+      matchCriteria.institute = { 
+        $regex: search.trim(), 
+        $options: 'i' 
+      };
+    }
+
+    // Get unique institution names with verifier count
+    const institutions = await User.aggregate([
+      { $match: matchCriteria },
+      {
+        $group: {
+          _id: '$institute',
+          verifierCount: { 
+            $sum: { $cond: [{ $eq: ['$role', 'VERIFIER'] }, 1, 0] } 
+          }
+        }
+      },
+      { $match: { verifierCount: { $gt: 0 } } }, // Only institutions with verifiers
+      { $sort: { _id: 1 } },
+      { $limit: 100 }, // Limit to 100 institutions
+      {
+        $project: {
+          id: { $toString: '$_id' }, // Use institution name as ID
+          name: '$_id',
+          verifierCount: 1,
+          _id: 0
+        }
+      }
+    ]);
+
+    res.json({
+      institutions,
+      total: institutions.length
+    });
+
+  } catch (error) {
+    console.error('Get institutions error:', error);
+    res.status(500).json({
+      message: 'Failed to fetch institutions',
+      error: error.message
     });
   }
 });

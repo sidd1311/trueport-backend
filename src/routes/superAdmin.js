@@ -154,7 +154,7 @@ router.put('/change-password', requireSuperAdmin, async (req, res) => {
 });
 
 // Create Institution
-router.post('/institutions', requireSuperAdmin, async (req, res) => {
+router.post('/institutions', requireSuperAdmin, async (req, res) => { 
   try {
     const {
       name,

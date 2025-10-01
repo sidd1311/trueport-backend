@@ -133,6 +133,7 @@ router.get('/pending', requireAuth, async (req, res) => {
       requestedRole: request.requestedRole,
       institute: request.institute,
       requestMessage: request.requestMessage,
+      status: request.status,
       requestedAt: request.requestedAt,
       requestAge: request.requestAge,
       expiresAt: request.expiresAt
