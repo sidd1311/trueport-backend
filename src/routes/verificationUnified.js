@@ -2,7 +2,7 @@ const express = require('express');
 const User = require('../models/User');
 const Experience = require('../models/Experience');
 const Education = require('../models/Education');
-const GithubProject = require('../models/GithubProject');
+const Project = require('../models/Project');
 const Verification = require('../models/Verification');
 const VerificationLog = require('../models/VerificationLog');
 const { requireAuth } = require('../middlewares/auth');
@@ -21,9 +21,6 @@ const getModelAndItem = async (itemType, itemId, userId = null) => {
       break;
     case 'EDUCATION':
       Model = Education;
-      break;
-    case 'GITHUB_PROJECT':
-      Model = GithubProject;
       break;
     default:
       throw new Error('Invalid item type');
@@ -51,7 +48,7 @@ router.post('/request/:itemType/:itemId', requireAuth, async (req, res) => {
     }
 
     // Validate item type
-    const validTypes = ['EXPERIENCE', 'EDUCATION', 'GITHUB_PROJECT'];
+    const validTypes = ['EXPERIENCE', 'EDUCATION'];
     if (!validTypes.includes(itemType.toUpperCase())) {
       return res.status(400).json({
         message: 'Invalid item type. Must be one of: ' + validTypes.join(', ')
@@ -147,7 +144,7 @@ router.post('/request/:itemType/:itemId', requireAuth, async (req, res) => {
     }).save();
 
     // Send verification email
-    const itemTitle = item.title || item.courseName || item.projectName || 'Item';
+    const itemTitle = item.title || item.courseName || 'Item';
     const emailSent = await sendVerificationEmail(
       verifier.email,
       token,
@@ -238,7 +235,7 @@ router.get('/:token', async (req, res) => {
       },
       itemType: verification.itemType,
       item: {
-        title: item.title || item.courseName || item.projectName,
+        title: item.title || item.courseName,
         description: item.description,
         startDate: item.startDate,
         endDate: item.endDate,

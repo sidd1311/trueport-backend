@@ -2,7 +2,7 @@ const express = require('express');
 const User = require('../models/User');
 const Experience = require('../models/Experience');
 const Education = require('../models/Education');
-const GithubProject = require('../models/GithubProject');
+const Project = require('../models/Project');
 const axios = require('axios');
 
 const router = express.Router();
@@ -121,12 +121,11 @@ router.get('/:userId', async (req, res) => {
       }).sort({ passingYear: -1, createdAt: -1 });
     }
 
-    // Get verified GitHub projects (only public ones)
-    let githubProjects = [];
+    // Get projects (only public ones, no verification needed)
+    let projects = [];
     if (settings.sections.showProjects) {
-      githubProjects = await GithubProject.find({
+      projects = await Project.find({
         userId: req.params.userId,
-        verified: true,
         isPublic: true
       }).sort({ createdAt: -1 });
     }
@@ -165,13 +164,13 @@ router.get('/:userId', async (req, res) => {
 
     // Calculate portfolio stats
     const latestEducation = education.length > 0 ? education[0] : null;
-    const latestGithubProject = githubProjects.length > 0 ? githubProjects[0] : null;
+    const latestProject = projects.length > 0 ? projects[0] : null;
     
     const stats = {
       totalExperiences: experiences.length,
       totalEducation: education.length,
-      totalGithubProjects: githubProjects.length,
-      totalVerifications: experiences.length + education.length + githubProjects.length,
+      totalProjects: projects.length,
+      totalVerifications: experiences.length + education.length,
       githubRepos: githubRepos.length,
       lastUpdated: experiences.length > 0 ? experiences[0].verifiedAt : user.createdAt
     };
@@ -180,10 +179,10 @@ router.get('/:userId', async (req, res) => {
       user: response.user, // Use the filtered user object that respects visibility settings
       experiences,
       education,
-      githubProjects,
+      projects,
       githubRepos,
       latestEducation,
-      latestGithubProject,
+      latestProject,
       stats
     });
 

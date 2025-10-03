@@ -789,7 +789,7 @@ router.put('/me/portfolio-item/:itemType/:itemId/visibility', requireAuth, async
         Model = require('../models/Education');
         break;
       case 'project':
-        Model = require('../models/GithubProject');
+        Model = require('../models/Project');
         break;
       default:
         return res.status(400).json({
@@ -866,7 +866,7 @@ router.put('/me/portfolio-items/bulk-visibility', requireAuth, async (req, res) 
             Model = require('../models/Education');
             break;
           case 'project':
-            Model = require('../models/GithubProject');
+            Model = require('../models/Project');
             break;
           default:
             results.failed.push({
@@ -926,7 +926,7 @@ router.get('/me/portfolio-items', requireAuth, async (req, res) => {
   try {
     const Experience = require('../models/Experience');
     const Education = require('../models/Education');
-    const GithubProject = require('../models/GithubProject');
+    const GithubProject = require('../models/Project');
 
     // Get all experiences with visibility status
     const experiences = await Experience.find({ userId: req.user._id })
@@ -939,8 +939,9 @@ router.get('/me/portfolio-items', requireAuth, async (req, res) => {
       .sort({ passingYear: -1, createdAt: -1 });
 
     // Get all projects with visibility status
-    const projects = await GithubProject.find({ userId: req.user._id })
-      .select('projectName description technologies projectType verified isPublic createdAt')
+    const Project = require('../models/Project');
+    const projects = await Project.find({ userId: req.user._id })
+      .select('title description skillsUsed category projectType isPublic createdAt')
       .sort({ createdAt: -1 });
 
     res.json({
@@ -969,11 +970,11 @@ router.get('/me/portfolio-items', requireAuth, async (req, res) => {
       })),
       projects: projects.map(proj => ({
         id: proj._id,
-        title: proj.projectName,
+        title: proj.title,
         description: proj.description,
-        technologies: proj.technologies,
+        skillsUsed: proj.skillsUsed,
+        category: proj.category,
         projectType: proj.projectType,
-        verified: proj.verified,
         isPublic: proj.isPublic,
         createdAt: proj.createdAt,
         type: 'project'
@@ -1087,11 +1088,10 @@ router.get('/me/portfolio-preview', requireAuth, async (req, res) => {
 
     // Get projects (only public ones for portfolio)
     if (settings.sections.showProjects) {
-      const GithubProject = require('../models/GithubProject');
+      const Project = require('../models/Project');
       
-      response.sections.projects = await GithubProject.find({
+      response.sections.projects = await Project.find({
         userId: req.user._id,
-        verified: true,
         isPublic: true
       }).sort({ createdAt: -1 });
     }
